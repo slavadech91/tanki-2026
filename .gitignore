@@ -1,0 +1,22 @@
+# Only what is listed here is published: the server, the tools, the notes and the model viewer page.
+# Everything else in this folder stays local: the client and its static files (tanki-src/), game resources
+# (tanki-assets/), traffic captures with account data (captures/), the browser profile, the server cache (cache/).
+/*
+!/.gitignore
+!/.gitattributes
+!/LICENSE
+!/README.md
+!/MODLOG.md
+!/requirements.txt
+!/server/
+!/server-notes/
+!/tools/
+!/tanki-viewer/
+/tanki-viewer/*
+!/tanki-viewer/index.html
+
+# accounts of the local server
+/server/data/
+__pycache__/
+*.pyc
+*.part

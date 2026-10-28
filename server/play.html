@@ -1,0 +1,100 @@
+<!doctype html>
+<html translate="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,viewport-fit=cover,initial-scale=1,user-scalable=no">
+<meta name="google" content="notranslate">
+<title>Tanki 2026</title>
+<link rel="icon" href="data:,">
+<script>
+// Globals the official client bundle reads from its page (tankiBuildConstants, analytics, isRussia).
+window.tankiBuildConstants = {copyrightYear: 2026, isBuildForChina: false, isProduction: true,
+                              appLink: 'https://app.tankionline.com'};
+window.analytics = {yametrica: {enabled: false, id: 0}, ga: {enabled: false, id: ''}};
+window.isRussia = window.isRuLocale = [new URLSearchParams(location.search).get('locale') || '']
+  .concat(navigator.languages || [navigator.language || '']).some(function (l) { return /^ru/i.test(l); });
+
+// The server has no login by the "remember me" hash yet: always start from the login/registration screen.
+try { localStorage.removeItem('entrance_hash_key'); localStorage.removeItem('name-userHash'); } catch (e) {}
+
+// Embedded and automated browsers deny the screen wake lock; the client then fails on the rejected promise.
+try {
+  if (navigator.wakeLock) navigator.wakeLock.request = function () {
+    var s = new EventTarget();
+    s.released = false;
+    s.type = 'screen';
+    s.release = function () { s.released = true; return Promise.resolve(); };
+    return Promise.resolve(s);
+  };
+} catch (e) {}
+
+// ?timer-raf: frames by a 16 ms timer, for a hidden browser pane where requestAnimationFrame never fires.
+if (/[?&]timer-raf\b/.test(location.search)) {
+  window.requestAnimationFrame = function (cb) { return setTimeout(function () { cb(performance.now()); }, 16); };
+  window.cancelAnimationFrame = function (id) { clearTimeout(id); };
+}
+
+// Error reports and analytics stay local: Sentry events land in window.__sentry and the console.
+(function () {
+  var external = /sentry\.|mc\.yandex|google-analytics|googletagmanager/;
+  window.__sentry = [];
+  function keep(url, body) {
+    if (/sentry\./.test(url)) { window.__sentry.push(body); console.warn('[sentry]', String(body).slice(0, 3000)); }
+  }
+  var fetch0 = window.fetch;
+  window.fetch = function (u, o) {
+    var url = String(u && u.url || u);
+    if (external.test(url)) { keep(url, o && o.body); return Promise.resolve(new Response('{}')); }
+    return fetch0.apply(this, arguments);
+  };
+  var open0 = XMLHttpRequest.prototype.open, send0 = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (m, u) { this.__url = String(u); return open0.apply(this, arguments); };
+  XMLHttpRequest.prototype.send = function (b) {
+    if (external.test(this.__url || '')) { keep(this.__url, b); return; }
+    return send0.apply(this, arguments);
+  };
+  if (navigator.sendBeacon) {
+    var beacon0 = navigator.sendBeacon.bind(navigator);
+    navigator.sendBeacon = function (u, b) {
+      if (external.test(String(u))) { keep(String(u), b); return true; }
+      return beacon0(u, b);
+    };
+  }
+})();
+</script>
+<style>
+@font-face { font-family: BaseFontRegular; src: url(/static/fonts/Rubik-Regular.7e001ec0.woff) format('woff'); }
+@font-face { font-family: BaseFontMedium; src: url(/static/fonts/Rubik-Medium.fc871fe9.woff) format('woff'); }
+@font-face { font-family: BaseFontBold; src: url(/static/fonts/Rubik-Bold.26ae1fce.woff) format('woff'); }
+@font-face { font-family: FallbackFontRegular; src: url(/static/fonts/MPLUS1p-Regular.d7322c05.ttf) format('truetype'); }
+@font-face { font-family: FallbackFontMedium; src: url(/static/fonts/MPLUS1p-Medium.2d50fad9.ttf) format('truetype'); }
+@font-face { font-family: FallbackFontBold; src: url(/static/fonts/MPLUS1p-Bold.be4e37ac.ttf) format('truetype'); }
+
+/* the client's styles rely on the font families above, --sar/--sal, .bgClipText and #root/#app-root/#modal-root */
+:root { --sar: env(safe-area-inset-right); --sal: env(safe-area-inset-left); }
+html, body {
+  position: fixed; width: 100%; height: 100%; margin: 0; overflow: hidden; touch-action: none;
+  background: #000; font-family: BaseFontMedium, FallbackFontMedium, sans-serif; -webkit-text-size-adjust: 100%;
+}
+* { -webkit-tap-highlight-color: transparent; }
+img { pointer-events: none; }
+#modal-root { position: absolute; top: 0; bottom: 0; width: 100%; height: 100%; pointer-events: none; }
+#modal-root > div { pointer-events: auto; }
+.bgClipText { background-clip: text; -webkit-background-clip: text; color: transparent; -webkit-text-fill-color: transparent; }
+
+/* shown until the client starts; the client removes #preloader itself */
+#preloader {
+  position: absolute; inset: 0; display: flex; align-items: flex-end; justify-content: center; user-select: none;
+  background: radial-gradient(50% 100% at 50% 100%, #2c4a66, #00141f); color: #fff;
+}
+#loading-text { margin-bottom: 60px; letter-spacing: .1em; text-transform: uppercase; }
+</style>
+</head>
+<body>
+<div id="preloader"><div id="loading-text">Loading…</div></div>
+<div id="root"><div id="app-root"></div><div id="modal-root"></div></div>
+<script>document.getElementById('loading-text').textContent = window.isRussia ? 'Загрузка…' : 'Loading…';</script>
+<!-- the official client; server-notes/proto_schema.json was generated from this build -->
+<script defer src="/static/js/main.289a5d50.js"></script>
+</body>
+</html>

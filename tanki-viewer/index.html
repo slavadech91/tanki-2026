@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tanki Models</title>
+<script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
+<style>
+  :root { --bg: #16181c; --panel: #1f2228; --line: #2e323a; --text: #e4e6ea; --muted: #8b919c; --accent: #e8a33d; }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; display: flex; background: var(--bg); color: var(--text); font: 13px system-ui, sans-serif; }
+  aside { width: 300px; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--panel); }
+  .tabs { display: flex; gap: 4px; padding: 10px; }
+  .tabs button { flex: 1; padding: 6px; background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 6px; cursor: pointer; }
+  .tabs button.on { color: var(--text); border-color: var(--accent); }
+  #list { overflow: auto; flex: 1; }
+  .item { padding: 8px 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .item:hover { background: #262a31; }
+  .item.on { background: #2c2a24; border-left: 3px solid var(--accent); }
+  .item b { font-weight: 600; }
+  .item small { display: block; color: var(--muted); margin-top: 2px; }
+  main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  model-viewer { flex: 1; width: 100%; background: radial-gradient(#2a2e36, #121418); }
+  #info { padding: 10px 14px; border-top: 1px solid var(--line); color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; max-height: 120px; overflow: auto; }
+  label { padding: 0 12px 10px; color: var(--muted); }
+</style>
+</head>
+<body>
+<aside>
+  <div class="tabs">
+    <button data-k="hull" class="on">Корпуса</button>
+    <button data-k="turret">Пушки</button>
+    <button data-k="other">Прочее</button>
+  </div>
+  <label><input type="checkbox" id="tex" checked> текстура (lightmap)</label>
+  <div id="list"></div>
+</aside>
+<main>
+  <model-viewer id="mv" camera-controls auto-rotate shadow-intensity="1" exposure="1.1" environment-image="neutral"></model-viewer>
+  <div id="info">Загрузка списка…</div>
+</main>
+<script>
+const mv = document.getElementById('mv'), list = document.getElementById('list'), info = document.getElementById('info');
+let items = [], kind = 'hull', cur = null, saved = new Map();
+const BUILD = Date.now();  // bypass cached .glb after re-export
+
+function show() {
+  list.innerHTML = '';
+  items.filter(i => i.kind === kind).forEach((it, n) => {
+    const d = document.createElement('div');
+    d.className = 'item' + (cur === it ? ' on' : '');
+    const name = it.nodes.find(x => !/^(hull|turret|boundbox)$/i.test(x)) || it.nodes[0];
+    d.innerHTML = `<b>${kind === 'other' ? it.nodes[0] : (kind === 'hull' ? 'Корпус' : 'Пушка') + ' #' + (n + 1)}</b>` +
+      `<small>${it.verts} вершин · ${it.kb} КБ · ${it.id}</small>`;
+    d.onclick = () => open(it);
+    list.appendChild(d);
+  });
+}
+
+function open(it) {
+  cur = it; show();
+  mv.src = 'models/' + it.id + '.glb?v=' + BUILD;
+  info.textContent = `папка: files/${it.path}\nфайлы: ${it.files.join(', ')}\nузлы: ${it.nodes.join(', ')}`;
+}
+
+// toggle textures by removing/restoring baseColorTexture on each material
+mv.addEventListener('load', () => { saved = new Map(); applyTex(); });
+document.getElementById('tex').onchange = applyTex;
+function applyTex() {
+  const on = document.getElementById('tex').checked;
+  for (const m of mv.model?.materials || []) {
+    let pbr;
+    try { pbr = m.pbrMetallicRoughness; } catch { continue; }  // materials no mesh uses are never loaded
+    if (!saved.has(m)) saved.set(m, pbr.baseColorTexture.texture);
+    const t = saved.get(m);
+    if (t) pbr.baseColorTexture.setTexture(on ? t : null);
+  }
+}
+
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
+  kind = b.dataset.k; show();
+  const first = items.find(i => i.kind === kind); if (first) open(first);
+});
+
+fetch('models.json').then(r => r.json()).then(d => {
+  items = d; show(); open(items.find(i => i.kind === kind));
+}).catch(e => info.textContent = 'Не удалось загрузить models.json: ' + e);
+</script>
+</body>
+</html>
