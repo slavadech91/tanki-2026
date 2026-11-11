@@ -5,6 +5,18 @@
 `{name, size, md5}`, текстуры в нескольких сжатиях (`*-astc.ktx`, `*-etc1.ktx`, `*-dxt.ktx`, `.webp`).
 ID ресурсов клиент получает с сервера. Скачано: `tanki-assets/files/` (запись `tools/record_cdp.py`).
 
+## Картинки интерфейса и переводы: `__webpack_require__.p` ✅ (бандл main.289a5d50.js, проверено 2026-10-29)
+- Ресурсы игры клиент берёт со своего адреса, если открыт не на tankionline.com (@1134473). Картинки интерфейса,
+  переводы (`static/translations/ru.d6b949df.json`), textdata, звуки и видео — `i.p + "static/..."`, а
+  `__webpack_require__.p = "https://s.eu.tankionline.com/"` зашит в бандл (1219 таких ссылок).
+- Если CDN недоступен (2026-10-29: TLS-рукопожатие с `s.eu.tankionline.com` и `tankionline.com` обрывается),
+  клиент навсегда висит на «Загрузке…»: перевод и шрифтовая картинка `dejavu-sans-mono` не скачались.
+- Наш сервер отдаёт бандл с `__webpack_require__.p = "/"` (`server/web.py`), всё `static/` идёт через свой кэш.
+  Копия `static/` с сайта: `tanki-src/static/` (нет 5 svg с пробелом в имени, например `Double armor.064daed8.svg`).
+- Перед боем клиент заранее качает картинки боя из `static/images/` (молнии, атлас припасов, иконки снарядов).
+  Если одной нет (404 на `railgun_incendiary projectiles.f37f8a30.svg`), сокет боя он не открывает и загрузка
+  обучения висит без ошибок. Пять недостающих svg взяты из кэша браузера и сверены с CDN побайтно.
+
 ## Как клиент узнаёт ресурсы ✅ (protocol-codecs.md, `loadDependencies`)
 - Список ресурсов приходит в `loadDependencies`: `{id: i64, type: i16, subType: i16, version: i64, isLazy, deps}`.
   В данных моделей ресурс — это просто i64 id (кодек `ds`), объект ресурса берётся из реестра по id.

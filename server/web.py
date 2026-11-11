@@ -7,7 +7,8 @@
 No game files are kept in the repository: /static and /resources are downloaded once from the official CDN
 (s.eu.tankionline.com) into the cache folder: cache/ at the repository root, or $TANKI_CACHE.
 The client takes resources and config from its own origin when not on tankionline.com (bundle @1134473);
-its UI images and translations it loads straight from the CDN (__webpack_require__.p).
+its UI images and translations come from __webpack_require__.p, hardcoded to the CDN: the bundle is served with
+that path pointed at our own /static/, so the client starts while the CDN is unreachable.
 """
 import asyncio, os, urllib.parse, urllib.request
 
@@ -17,6 +18,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE = os.environ.get('TANKI_CACHE') or os.path.join(ROOT, 'cache')
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'play.html')
 CDN = 'https://s.eu.tankionline.com/'
+PUBLIC_PATH = (b'__webpack_require__.p="https://s.eu.tankionline.com/"', b'__webpack_require__.p="/"')
 
 
 def local(base, rel):
@@ -43,6 +45,15 @@ async def fetch(path, url, log):
 
 
 def make_app(ws_port, log):
+    bundles = {}    # path -> the bundle with its public path on our origin
+
+    def bundle(path):
+        if path not in bundles:
+            with open(path, 'rb') as f:
+                bundles[path] = f.read().replace(*PUBLIC_PATH)
+        return web.Response(body=bundles[path], content_type='application/javascript',
+                            headers={'Cache-Control': 'no-cache'})
+
     async def play(request):
         return web.FileResponse(PAGE, headers={'Cache-Control': 'no-cache'})
 
@@ -59,6 +70,8 @@ def make_app(ws_port, log):
             raise web.HTTPNotFound()
         if not os.path.isfile(path) and not await fetch(path, CDN + 'static/' + urllib.parse.quote(rel), log):
             raise web.HTTPNotFound()
+        if rel.startswith('js/main.') and rel.endswith('.js'):
+            return bundle(path)
         return web.FileResponse(path)
 
     async def resources(request):

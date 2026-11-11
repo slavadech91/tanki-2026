@@ -14,9 +14,6 @@ window.analytics = {yametrica: {enabled: false, id: 0}, ga: {enabled: false, id:
 window.isRussia = window.isRuLocale = [new URLSearchParams(location.search).get('locale') || '']
   .concat(navigator.languages || [navigator.language || '']).some(function (l) { return /^ru/i.test(l); });
 
-// The server has no login by the "remember me" hash yet: always start from the login/registration screen.
-try { localStorage.removeItem('entrance_hash_key'); localStorage.removeItem('name-userHash'); } catch (e) {}
-
 // Embedded and automated browsers deny the screen wake lock; the client then fails on the rejected promise.
 try {
   if (navigator.wakeLock) navigator.wakeLock.request = function () {
@@ -94,7 +91,9 @@ img { pointer-events: none; }
 <div id="preloader"><div id="loading-text">Loading…</div></div>
 <div id="root"><div id="app-root"></div><div id="modal-root"></div></div>
 <script>document.getElementById('loading-text').textContent = window.isRussia ? 'Загрузка…' : 'Loading…';</script>
-<!-- the official client; server-notes/proto_schema.json was generated from this build -->
-<script defer src="/static/js/main.289a5d50.js"></script>
+<!-- the official client; server-notes/proto_schema.json was generated from this build.
+     ?local: a new URL for the copy web.py serves with its public path on our origin, past the browser cache -->
+
+<script defer src="/static/js/main.289a5d50.js?local"></script>
 </body>
 </html>

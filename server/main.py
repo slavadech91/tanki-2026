@@ -36,12 +36,19 @@ class Session:
         self.accounts = ACCOUNTS
         self.user = None
         self.spaces = {}            # space id -> Space
+        self.pending_spaces = set()
         self.battle_ready = False
+        self.start_in_lobby = False
+        self.battle_opening = False
         self.tasks = set()
 
     @property
     def uid(self):
         return self.user['uid'] if self.user else None
+
+    @property
+    def battle(self):
+        return self.spaces.get(spaces.LOCAL_BATTLE) or self.spaces.get(spaces.TUTORIAL)
 
     def log(self, *a):
         log('[%s]' % (self.uid or self.hash.hex()[:8]), *a)
@@ -56,14 +63,16 @@ class Session:
 
     async def open_spaces(self, *ids):
         if not self.main.closed:
+            self.pending_spaces.update(ids)
             await self.main.send_bytes(protocol.open_space(*ids))
             self.log('<- OpenSpace', ' '.join(ids))
 
     async def attach(self, space_id, ws):
         cls = spaces.SPACES.get(space_id)
-        if cls is None:
-            self.log('unknown space', space_id)
+        if cls is None or space_id not in self.pending_spaces:
+            self.log('space was not opened by the server', space_id)
             return None
+        self.pending_spaces.remove(space_id)
         space = self.spaces[space_id] = cls(self, ws)
         self.log('space connected:', space.name)
         await space.on_open()
@@ -77,11 +86,45 @@ class Session:
         await asyncio.sleep(1)
         await self.open_spaces(spaces.SHOP, spaces.TUTORIAL)
 
+    async def enter_lobby(self):
+        self.start_in_lobby = True
+        await self.open_spaces(spaces.SYSTEM)
+        await asyncio.sleep(1)
+        await self.open_spaces(spaces.LOBBY)
+        await asyncio.sleep(1)
+        await self.open_spaces(spaces.SHOP, spaces.CHAT)
+
+    async def start_local_battle(self):
+        lobby = self.spaces.get(spaces.LOBBY)
+        if (lobby is None or not (self.user or {}).get('tutorial_done') or self.battle_opening
+                or self.battle is not None):
+            return
+        self.battle_opening = True
+        self.battle_ready = False
+        await lobby.begin_battle()
+        await self.open_spaces(spaces.LOCAL_BATTLE)
+
     async def battle_loaded(self):
         self.battle_ready = True
         lobby = self.spaces.get(spaces.LOBBY)
         if lobby is not None and lobby.began:
             await lobby.end_battle_switch()
+
+    async def leave_battle(self):
+        """Close the current battle and return to the lobby, opening chat on the first visit."""
+        self.pending_spaces.difference_update((spaces.TUTORIAL, spaces.LOCAL_BATTLE))
+        battle = self.battle
+        if battle is not None:
+            self.spaces.pop(battle.id)
+            await battle.ws.close()
+        self.battle_opening = False
+        self.battle_ready = False
+        lobby = self.spaces.get(spaces.LOBBY)
+        if spaces.CHAT in self.spaces and lobby is not None:
+            await lobby.send(lobby.T['end_lobby'])
+            return
+        await asyncio.sleep(0.5)
+        await self.open_spaces(spaces.CHAT)
 
 
 async def ws_handler(request):
@@ -129,6 +172,10 @@ async def ws_handler(request):
         ping_task.cancel()
         if space is not None:
             space.on_close()
+            if space.session.spaces.get(space.id) is space:
+                space.session.spaces.pop(space.id)
+                if space.id == spaces.LOCAL_BATTLE:
+                    space.session.battle_opening = space.session.battle_ready = False
             space.session.log('space closed:', space.name)
         if session is not None:
             for t in session.tasks:

@@ -20,7 +20,10 @@ TOKEN = re.compile(r'([?&](?:state|token|hash|sig|signature|session|auth)=)[^&"]
 
 # sockets of the registration session in captures/session1 (server-notes/registration-to-tutorial.md)
 SOCKETS = {'entrance': '18384.9982', 'system': '18384.10274', 'lobby': '18384.10275', 'shop': '18384.10276',
-           'battle': '18384.11000'}
+           'battle': '18384.11000', 'chat': '18384.11548'}
+# weapon CC model -> kind, and the class of bot tank objects (tutorial bots, registration-to-tutorial.md part 5)
+WEAPONS = {'1e24fd4b0c6e92fb': 'smoky', '234fc2564fd0fccf': 'ricochet', '3dac48bd48435a31': 'firebird'}
+TANK_CLASS = 'ffffffff80000493'
 
 dump = [json.loads(line) for line in open(sys.argv[1], encoding='utf-8')]
 out_dir = sys.argv[2]
@@ -82,7 +85,10 @@ def system():
 
 def lobby():
     pk = server(packets('lobby'))
-    return {'open': cmds(pk[0]), 'begin_battle': cmds(pk[1]), 'end_battle': cmds(pk[2])}
+    switches = [[c for c in cmds(p) if c['name'].endswith('LayoutSwitch')] for p in pk
+                if any(c['name'].endswith('LayoutSwitch') for c in p['commands'])]
+    return {'open': cmds(pk[0]), 'begin_battle': cmds(pk[1]), 'end_battle': cmds(pk[2]),
+            'begin_lobby': switches[2], 'end_lobby': switches[3]}     # after the tutorial: MATCHMAKING
 
 
 def shop():
@@ -91,11 +97,80 @@ def shop():
             'reply_b6f461': first_with(pk, '137105'), 'reply_announcements': first_with(pk, 'announcements')}
 
 
+def missions():
+    pk = packets('shop')
+    start = next(i for i, p in enumerate(pk) if p['dir'] == '>' and
+                 any(c['name'] == 'e75976' for c in p['commands']))
+    tail = server(pk[start:])
+    categories = [c for c in first_with(pk[start:], 'categoriesStatistic') if c['name'] == 'categoriesStatistic']
+    sets = {}
+    for p in tail:
+        for c in cmds(p):
+            if c['name'] == 'setQuests' and c['args'][0]:
+                category = str(c['args'][0][0]['categoryId'])
+                sets.setdefault(category, c)
+    categories[0]['args'][0] = [s for s in categories[0]['args'][0] if str(s['questCategoryId']) in sets]
+    content = [c for c in first_with(pk[start:], 'elementContent') if c['name'] == 'elementContent']
+    completion = next(cmds(p) for p in server(pk) if
+                      any(c['name'] == 'updateMainQuest' and c['args'][0] == 1931009801849
+                          for c in p['commands']))
+    return {'categories': categories, 'sets': sets, 'content': content, 'completion': completion}
+
+
+def signed(hex_id):
+    v = int(hex_id, 16)
+    return v - (1 << 64) if v >= 1 << 63 else v
+
+
+def bot(pk, i, connect, classes):
+    """A tutorial bot from its userConnect in packet i: loads, objects, first spawn, weapon, lobby user info."""
+    user_id = connect['args'][0]
+    tank = '%016x' % user_id
+    info = next(u for u in connect['args'][1] if u['user'] == user_id)
+    objects = next(c for p in server(pk[i:]) for c in cmds(p) if c['name'] == 'loadObjectsData'
+                   and any(o['id'] == tank for o in c['args'][0]['objects']))
+    spawn = []
+    for name in ('setActive', 'setSpecification', 'spawn'):
+        spawn += [next(c for p in server(pk[i:]) for c in cmds(p) if c['name'] == name and c['object'] == tank)]
+    weapon, kind = next((o['id'], WEAPONS[m]) for o in objects['args'][0]['objects']
+                        for m in classes.get(o['class'], []) if m in WEAPONS)
+    lobby_info = [c for p in server(packets('lobby')) for c in cmds(p) if c['args'] and isinstance(c['args'][0], list)
+                  and c['args'][0] and isinstance(c['args'][0][0], dict) and c['args'][0][0].get('userId') == user_id]
+    return {'id': tank, 'uid': info['uid'], 'rank': info['rank'], 'weapon': weapon, 'kind': kind,
+            'load': [c for c in cmds(pk[i]) if c['name'] == 'loadDependencies'], 'objects': objects, 'spawn': spawn,
+            'unload': [signed(o['id']) for o in objects['args'][0]['objects']], 'lobby': lobby_info}
+
+
 def battle():
     pk = packets('battle')
-    return {'open': cmds(server(pk)[0]), 'objects': cmds(server(pk)[1]),
-            'prepare': first_with(pk, 'prepareToSpawn'), 'spawn': first_with(pk, 'spawn'),
-            'activate': first_with(pk, 'cb856a')}
+    t = {'open': cmds(server(pk)[0]), 'objects': cmds(server(pk)[1]),
+         'prepare': first_with(pk, 'prepareToSpawn'), 'spawn': first_with(pk, 'spawn'),
+         'activate': first_with(pk, 'cb856a')}
+    # tutorial stages after the movement stage: the target, the bonus, six bots (registration-to-tutorial.md part 5)
+    classes = {k['id']: k['models'] for p in pk for c in p['commands'] if c['name'] == 'loadDependencies'
+               for k in c['args'][0]['classes']}
+    bots = [bot(pk, i, c, classes) for i, p in enumerate(pk) if p['dir'] == '<'
+            for c in cmds(p) if c['name'] == 'userConnect']
+    t['target'], t['bots'] = bots[0], bots[1:]
+    spawns = [c for p in server(pk) for c in cmds(p) if c['name'] == 'spawnBonuses']
+    t['bonus_first'], t['bonus_more'] = [spawns[0]], [spawns[1]]
+    taken = next(i for i, p in enumerate(pk) if any(c['name'] == 'f5d182' for c in p['commands']))
+    # the reply to the first pickup: heal effect, its objects, tutorial event, bonus taken; health comes from the server
+    t['bonus_pickup'] = [c for c in cmds(server(pk[taken:])[0]) if c['name'] not in ('b30f91', 'userConnect')
+                         and not (c['name'] == 'loadDependencies' and c['args'][0]['callbackId'])]
+    t['battle_signal'] = [c for c in first_with(pk, '618bf6') if c['name'] == '618bf6']
+    # Shift (e5f70d): the reply, and 2 s later Hunter's EMP on the bot next to the player, up to its kill
+    used = next(i for i, p in enumerate(pk) if any(c['name'] == 'e5f70d' for c in p['commands']))
+    t['overdrive_use'] = cmds(server(pk[used:])[0])
+    emp = first_with(pk, 'dispel')
+    t['overdrive_emp'] = emp[:next(i for i, c in enumerate(emp) if c['name'] == 'refreshUsersStat')]
+    t['finish'] = [c for c in first_with(pk, 'roundFinish') if c['name'] in ('38bbe3', 'roundFinish')]
+    t['progress'] = first_with(pk, 'updatedProgress')
+    return t
+
+
+def chat():
+    return {'open': cmds(server(packets('chat'))[0])}
 
 
 def scrub(value, secrets):
@@ -114,7 +189,8 @@ registration = entrance()['register']
 secrets = [(next(c['args'][0] for c in registration if c['name'] == 'rememberUsersHash'), HASH),
            (next(c['args'][0] for c in registration if c['name'] == 'setUid'), UID)]
 os.makedirs(out_dir, exist_ok=True)
-for name, make in (('entrance', entrance), ('system', system), ('lobby', lobby), ('shop', shop), ('battle', battle)):
+for name, make in (('entrance', entrance), ('system', system), ('lobby', lobby), ('shop', shop), ('battle', battle),
+                   ('chat', chat), ('missions', missions)):
     t = scrub(make(), secrets)
     path = os.path.join(out_dir, name + '.json')
     json.dump(t, open(path, 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))

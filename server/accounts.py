@@ -3,7 +3,7 @@
 Nicknames are unique without regard to case. Every account gets the user id of the captured account for now:
 the templates carry that id in object ids and data (server-notes/registration-to-tutorial.md).
 """
-import hashlib, json, os, secrets, time
+import hashlib, hmac, json, os, secrets, time
 
 PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'accounts.json')
 TEMPLATE_USER_ID = 3074457415747269434   # 0x2aaaaabafeae733a, the captured account
@@ -15,8 +15,11 @@ def _digest(password, salt):
 
 class Accounts:
     def __init__(self, path=PATH):
-        self.path = path
-        self.users = json.load(open(path, encoding='utf-8')) if os.path.isfile(path) else {}
+        self.path = os.path.abspath(path)
+        self.users = {}
+        if os.path.isfile(self.path):
+            with open(self.path, encoding='utf-8') as source:
+                self.users = json.load(source)
 
     def get(self, uid):
         return next((u for name, u in self.users.items() if name.lower() == uid.lower()), None)
@@ -31,7 +34,13 @@ class Accounts:
 
     def check(self, uid, password):
         user = self.get(uid)
-        return user if user and _digest(password, user['salt']) == user['password'] else None
+        return user if user and hmac.compare_digest(_digest(password, user['salt']), user['password']) else None
+
+    def check_token(self, token):
+        if not token or not token.isascii():
+            return None
+        return next((user for user in self.users.values()
+                     if user.get('hash') and hmac.compare_digest(token, user['hash'])), None)
 
     def save(self):
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
